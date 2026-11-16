@@ -1,0 +1,17 @@
+# Local development credentials
+.env*
+.secrets/
+*.pem
+*.p8
+*.key
+*.p12
+*.provisionprofile
+*.mobileprovision
+*.dmg
+*.zip
+.build/
+build/
+.DS_Store
+__pycache__/
+*.pyc
+.swiftpm/

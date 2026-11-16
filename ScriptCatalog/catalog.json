@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "scripts": [
+    {"path": "scripts/kimi-usage"}
+  ]
+}

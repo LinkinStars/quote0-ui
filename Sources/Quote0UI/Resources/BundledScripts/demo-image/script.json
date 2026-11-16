@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"official.demo-image","name":"图像测试","version":"1.1.0","description":"选择本地图片并调整它在墨水屏上的显示方式","entrypoint":"run.sh","outputType":"image","requirements":["python3","Pillow（python3 -m pip install pillow）"],"parameters":[{"key":"picture","label":"展示图片","type":"image","required":true}]}

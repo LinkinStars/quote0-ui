@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "official.kimi-usage",
+  "name": "Kimi 用量",
+  "version": "2.1.1",
+  "description": "以黑白进度条显示 Kimi 5 小时与每周用量",
+  "entrypoint": "run.sh",
+  "outputType": "image",
+  "requirements": ["python3", "Pillow（python3 -m pip install pillow）"],
+  "parameters": [
+    {"key": "kimiApiKey", "label": "Kimi API Key", "type": "secret", "required": true},
+    {"key": "showResetTime", "label": "显示重置时间", "type": "boolean", "default": true}
+  ]
+}

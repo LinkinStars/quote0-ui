@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"official.demo-canvas","name":"画板测试","version":"1.1.0","description":"展示 Dot. 官方 Canvas API 卡片样例","entrypoint":"run.sh","outputType":"canvas","requirements":["python3"],"parameters":[]}

@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"official.demo-text","name":"文本测试","version":"1.1.1","description":"展示你填写的固定文字","entrypoint":"run.sh","outputType":"text","requirements":["python3"],"parameters":[{"key":"message","label":"展示文字","type":"multiline","required":true,"default":"你好，Quote/0"}]}
