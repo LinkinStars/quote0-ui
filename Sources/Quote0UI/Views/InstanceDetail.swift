@@ -26,6 +26,14 @@ struct InstanceDetail: View {
                     Spacer()
                     Toggle("启用", isOn: binding(\.enabled)).toggleStyle(.switch)
                         .disabled(instance.taskKey.isEmpty)
+                    Button("删除内容", role: .destructive) { confirmDelete = true }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .confirmationDialog("删除“\(script?.manifest.name ?? instance.scriptID)”的这个内容任务？", isPresented: $confirmDelete) {
+                            Button("删除内容", role: .destructive) { model.deleteInstance(instance.id) }
+                        } message: {
+                            Text("脚本仍会保留在已安装列表；设备内容槽不会被删除，可绑定其他任务。")
+                        }
                 }
                 if let script {
                     LabeledContent("类型", value: script.manifest.outputType.title)
@@ -71,7 +79,6 @@ struct InstanceDetail: View {
                         Button("更新内容") { Task { await model.run(instance.id, push: true) } }.disabled(instance.taskKey.isEmpty)
                         Button("立即显示") { Task { await model.run(instance.id, push: true, immediate: true) } }.disabled(instance.taskKey.isEmpty)
                         Spacer()
-                        Button("删除", role: .destructive) { confirmDelete = true }
                     }
                     VStack(alignment: .leading) {
                         HStack {
@@ -79,12 +86,8 @@ struct InstanceDetail: View {
                             Button("更新内容") { Task { await model.run(instance.id, push: true) } }.disabled(instance.taskKey.isEmpty)
                             Button("立即显示") { Task { await model.run(instance.id, push: true, immediate: true) } }.disabled(instance.taskKey.isEmpty)
                         }
-                        Button("删除", role: .destructive) { confirmDelete = true }
                     }
                     }.buttonStyle(.bordered)
-                    .confirmationDialog("删除这个脚本任务？", isPresented: $confirmDelete) {
-                        Button("删除任务", role: .destructive) { model.deleteInstance(instance.id) }
-                    }
                     if let preview = model.previews[instance.id] {
                         Divider()
                         Text("最近测试结果").font(.headline)

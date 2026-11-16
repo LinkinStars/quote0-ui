@@ -24,6 +24,8 @@ final class AppModel: ObservableObject {
     @Published var currentIntervalMinutes: Int = 5
     @Published var savedIntervalMinutes: Int = 5
     @Published var repositoryInput = ""
+    @Published var marketLoading = false
+    @Published var marketErrors: [String] = []
     @Published var apiKeyInput = ""
     @Published var selectedPage: AppPage = .overview
     @Published var selectedInstanceID: UUID?
@@ -35,6 +37,7 @@ final class AppModel: ObservableObject {
     private var timer: Timer?
     private var statusDismissTask: Task<Void, Never>?
     private var running: Set<UUID> = []
+    private var marketRefreshID = UUID()
 
     init() {
         try? store.prepare()
@@ -64,6 +67,7 @@ final class AppModel: ObservableObject {
         for name in ["demo-text", "demo-image", "demo-canvas"] {
             let source = root.appending(path: name)
             let manifest = try JSONDecoder().decode(ScriptManifest.self, from: Data(contentsOf: source.appending(path: "script.json")))
+            if data.removedBundledScriptIDs?.contains(manifest.id) == true { continue }
             if let index = data.installedScripts.firstIndex(where: { $0.id == manifest.id }) {
                 guard data.installedScripts[index].sourceRepository == nil,
                       data.installedScripts[index].manifest.version != manifest.version else { continue }
@@ -168,8 +172,7 @@ final class AppModel: ObservableObject {
     func addRepository() {
         do {
             let normalized = try GitHubRepository(repositoryInput).url
-            guard !data.repositories.contains(normalized) else { statusMessage = "仓库已添加"; return }
-            data.repositories.append(normalized)
+            if !data.repositories.contains(normalized) { data.repositories.append(normalized) }
             repositoryInput = ""
             persist()
             Task { await refreshMarket() }
@@ -180,23 +183,74 @@ final class AppModel: ObservableObject {
         data.repositories.removeAll { $0 == url }
         market.removeAll { $0.repository == url }
         persist()
+        Task { await refreshMarket() }
     }
 
     func refreshMarket() async {
-        guard !data.repositories.isEmpty else { return }
+        let refreshID = UUID()
+        marketRefreshID = refreshID
+        marketLoading = !data.repositories.isEmpty
+        marketErrors = []
+        guard !data.repositories.isEmpty else { market = []; return }
         var all: [MarketScript] = []
+        var errors: [String] = []
         for url in data.repositories {
             do { all += try await repositories.browse(url) }
-            catch { statusMessage = "\(url)：\(error.localizedDescription)" }
+            catch { errors.append("\(url)：\(error.localizedDescription)") }
         }
+        guard marketRefreshID == refreshID else { return }
         market = all
+        marketErrors = errors
+        marketLoading = false
         for index in data.installedScripts.indices {
+            data.installedScripts[index].availableUpdateSHA = nil
             guard let source = data.installedScripts[index].sourceRepository,
                   let newer = all.first(where: { $0.repository == source && $0.manifest.id == data.installedScripts[index].id }),
                   newer.sha != data.installedScripts[index].sourceSHA else { continue }
             data.installedScripts[index].availableUpdateSHA = newer.sha
         }
         persist()
+    }
+
+    func restoreBundledScripts() {
+        data.removedBundledScriptIDs = nil
+        do {
+            try installBundledIfNeeded()
+            persist()
+            statusMessage = "已恢复内置示例脚本"
+        } catch { statusMessage = error.localizedDescription }
+    }
+
+    func deleteScript(_ id: String) {
+        guard let script = data.installedScripts.first(where: { $0.id == id }) else { return }
+        let related = data.instances.filter { $0.scriptID == id }
+        guard !related.contains(where: { running.contains($0.id) }) else {
+            statusMessage = "脚本正在运行，请稍后再删除"
+            return
+        }
+        do { try store.deleteScript(script) }
+        catch { statusMessage = "删除脚本失败：\(error.localizedDescription)"; return }
+        for instance in related {
+            previews.removeValue(forKey: instance.id)
+            store.deletePreview(for: instance.id)
+            try? FileManager.default.removeItem(at: store.root.appending(path: "assets/\(instance.id.uuidString)"))
+        }
+        data.removeInstalledScript(id)
+        if ["official.demo-text", "official.demo-image", "official.demo-canvas"].contains(id) {
+            data.removedBundledScriptIDs = (data.removedBundledScriptIDs ?? []).union([id])
+        }
+        if let selectedInstanceID, !data.instances.contains(where: { $0.id == selectedInstanceID }) {
+            self.selectedInstanceID = data.instances.first?.id
+        }
+        persist()
+        statusMessage = "已删除“\(script.manifest.name)”及其 \(related.count) 个内容任务"
+    }
+
+    func clearRecords() {
+        guard !data.records.isEmpty else { return }
+        data.records.removeAll()
+        persist()
+        statusMessage = "运行记录已清空"
     }
 
     func importLocal(_ directory: URL) {
@@ -360,12 +414,14 @@ final class AppModel: ObservableObject {
     }
 
     func deleteInstance(_ id: UUID) {
+        guard !running.contains(id) else { statusMessage = "任务正在运行，请稍后再删除"; return }
         data.instances.removeAll { $0.id == id }
         previews.removeValue(forKey: id)
         store.deletePreview(for: id)
         try? FileManager.default.removeItem(at: store.root.appending(path: "assets/\(id.uuidString)"))
         if selectedInstanceID == id { selectedInstanceID = data.instances.first?.id }
         persist()
+        statusMessage = "内容任务已删除；设备槽保留当前画面，可重新绑定"
     }
 
     @discardableResult func run(_ id: UUID, push: Bool, immediate: Bool = false, scheduled: Bool = false, triggerOverride: String? = nil) async -> Bool {

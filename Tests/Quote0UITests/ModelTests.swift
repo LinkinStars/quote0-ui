@@ -113,6 +113,46 @@ final class ModelTests: XCTestCase {
         let result = try await ScriptRunner().run(installed, parameters: ["sample": .string("value")])
         XCTAssertEqual(result.content["message"], .string("OK"))
     }
+
+    func testDeletingInstalledScriptRemovesManagedDirectoryOnly() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appending(path: "source")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let manifest = ScriptManifest(schemaVersion: 1, id: "test.delete", name: "Delete", version: "1", description: "", entrypoint: "run.sh", outputType: .text)
+        try JSONEncoder().encode(manifest).write(to: source.appending(path: "script.json"))
+        let entry = source.appending(path: "run.sh")
+        try "#!/bin/sh\nexit 0\n".write(to: entry, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: entry.path)
+        let store = LocalStore(root: root.appending(path: "data"))
+        let installed = try store.importScript(from: source)
+        try store.deleteScript(installed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: installed.directory))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertThrowsError(try store.deleteScript(InstalledScript(manifest: manifest, directory: source.path)))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    func testRemovedBundledScriptsRemainRemovedAfterReload() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalStore(root: root)
+        var data = AppData()
+        data.removedBundledScriptIDs = ["official.demo-text"]
+        try store.save(data)
+        XCTAssertEqual(store.load().removedBundledScriptIDs, ["official.demo-text"])
+    }
+
+    func testRemovingScriptAlsoRemovesOnlyItsContentTasks() {
+        let first = ScriptManifest(schemaVersion: 1, id: "first", name: "First", version: "1", description: "", entrypoint: "run.sh", outputType: .text)
+        let second = ScriptManifest(schemaVersion: 1, id: "second", name: "Second", version: "1", description: "", entrypoint: "run.sh", outputType: .text)
+        var data = AppData()
+        data.installedScripts = [InstalledScript(manifest: first, directory: "/tmp/first"), InstalledScript(manifest: second, directory: "/tmp/second")]
+        data.instances = [ScriptInstance(scriptID: "first"), ScriptInstance(scriptID: "first"), ScriptInstance(scriptID: "second")]
+        XCTAssertEqual(data.removeInstalledScript("first").count, 2)
+        XCTAssertEqual(data.installedScripts.map(\.id), ["second"])
+        XCTAssertEqual(data.instances.map(\.scriptID), ["second"])
+    }
     func testBundledDemoScriptsRun() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let sampleImage = root.appending(path: "Tests/Quote0UITests/Fixtures/sample.png")

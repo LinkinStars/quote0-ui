@@ -135,6 +135,17 @@ struct LocalStore: Sendable {
         try FileManager.default.copyItem(at: directory, to: target)
         return InstalledScript(manifest: manifest, directory: target.path)
     }
+
+    func deleteScript(_ script: InstalledScript) throws {
+        let directory = URL(fileURLWithPath: script.directory).standardizedFileURL
+        guard directory.deletingLastPathComponent().path == scriptsURL.standardizedFileURL.path,
+              directory.lastPathComponent == script.id else {
+            throw AppError.message("脚本目录不在客户端管理范围内，无法删除")
+        }
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
 }
 
 struct ScriptRunner: Sendable {

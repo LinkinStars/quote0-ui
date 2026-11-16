@@ -174,6 +174,7 @@ struct MarketPage: View {
     @State private var pendingInstall: MarketScript?
     @State private var pendingLocal: URL?
     @State private var pendingUpdate: MarketScript?
+    @State private var pendingDeleteScript: InstalledScript?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -197,26 +198,55 @@ struct MarketPage: View {
                 HStack {
                     Text("已安装脚本").font(.headline)
                     Spacer()
+                    if model.data.removedBundledScriptIDs?.isEmpty == false {
+                        Button("恢复内置示例") { model.restoreBundledScripts() }
+                    }
                     Button("导入本地脚本…") { importing = true }
                 }
                 ForEach(model.data.installedScripts) { script in
-                    ScriptRow(manifest: script.manifest, detail: script.availableUpdateSHA == nil ? "已安装 · \(script.manifest.version)" : "有可用更新") {
+                    ScriptRow(manifest: script.manifest, detail: script.availableUpdateSHA == nil ? "已安装 · \(script.manifest.version)" : "有可用更新", actionTitle: "添加到内容", actionDisabled: false) {
                         model.addInstance(for: script)
                     } extra: {
-                        Button("在 Finder 打开") {
+                        Button {
                             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: script.directory)])
-                        }
+                        } label: { Image(systemName: "folder") }
+                            .accessibilityLabel("在 Finder 打开脚本目录")
                         if script.availableUpdateSHA != nil,
                            let item = model.market.first(where: { $0.manifest.id == script.id && $0.repository == script.sourceRepository }) {
                             Button("更新") { pendingUpdate = item }
                         }
+                        Button("卸载", role: .destructive) { pendingDeleteScript = script }
+                            .alert("卸载“\(script.manifest.name)”？", isPresented: Binding(
+                                get: { pendingDeleteScript?.id == script.id },
+                                set: { if !$0 { pendingDeleteScript = nil } }
+                            )) {
+                                Button("卸载脚本和内容任务", role: .destructive) {
+                                    model.deleteScript(script.id)
+                                    pendingDeleteScript = nil
+                                }
+                                Button("取消", role: .cancel) { pendingDeleteScript = nil }
+                            } message: {
+                                let count = model.data.instances.filter { $0.scriptID == script.id }.count
+                                Text("将删除脚本文件、本地修改及其 \(count) 个内容任务。设备内容槽会保留当前画面。")
+                            }
                     }
                 }
-                if !model.market.isEmpty { Text("仓库脚本").font(.headline) }
+                Text("仓库脚本").font(.headline)
+                if model.marketLoading { ProgressView("正在读取仓库脚本…") }
+                ForEach(model.marketErrors, id: \.self) { error in
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+                if !model.marketLoading && model.market.isEmpty && model.marketErrors.isEmpty {
+                    Text(model.data.repositories.isEmpty ? "添加公开 GitHub 仓库目录后，脚本会显示在这里。" : "当前目录没有可用脚本，可检查索引或点击上方按钮重试。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 ForEach(model.market) { item in
-                    if !model.data.installedScripts.contains(where: { $0.id == item.manifest.id }) {
-                        ScriptRow(manifest: item.manifest, detail: item.repository) { pendingInstall = item } extra: { EmptyView() }
-                    }
+                    let installed = model.data.installedScripts.contains(where: { $0.id == item.manifest.id })
+                    ScriptRow(manifest: item.manifest, detail: item.repository, actionTitle: installed ? "已安装" : "安装", actionDisabled: installed) {
+                        if !installed { pendingInstall = item }
+                    } extra: { EmptyView() }
                 }
             Text("第三方和本地脚本以当前用户权限执行，可读取本机文件及应用保存的密钥。安装前请确认来源和代码内容。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -250,6 +280,8 @@ struct MarketPage: View {
 private struct ScriptRow<Extra: View>: View {
     let manifest: ScriptManifest
     let detail: String
+    let actionTitle: String
+    let actionDisabled: Bool
     let action: () -> Void
     @ViewBuilder let extra: () -> Extra
     var body: some View {
@@ -262,7 +294,8 @@ private struct ScriptRow<Extra: View>: View {
             }
             Spacer()
             extra()
-            Button("添加到内容", action: action)
+            Button(actionTitle, action: action)
+                .disabled(actionDisabled)
         }
         .padding(14).background(.white, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.black.opacity(0.07)))
@@ -273,6 +306,7 @@ struct HistoryPage: View {
     @ObservedObject var model: AppModel
     @State private var selectedRecord: RunRecord?
     @State private var showFailuresOnly = false
+    @State private var showClearConfirmation = false
     private var visibleRecords: [RunRecord] {
         showFailuresOnly ? model.data.records.filter { $0.status == "失败" } : model.data.records
     }
@@ -288,6 +322,8 @@ struct HistoryPage: View {
                 .frame(width: 180)
                 Spacer()
                 Button("复制诊断日志") { model.copyDiagnosticLog() }
+                    .disabled(model.data.records.isEmpty)
+                Button("清空记录", role: .destructive) { showClearConfirmation = true }
                     .disabled(model.data.records.isEmpty)
             }
             if visibleRecords.isEmpty {
@@ -317,6 +353,11 @@ struct HistoryPage: View {
         }.padding(24)
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
+            .confirmationDialog("清空所有运行记录？", isPresented: $showClearConfirmation) {
+                Button("清空记录", role: .destructive) { model.clearRecords() }
+            } message: {
+                Text("记录清空后无法恢复；脚本和内容任务不会受影响。")
+            }
             .sheet(item: $selectedRecord) { record in
                 RunDetailSheet(record: record)
             }

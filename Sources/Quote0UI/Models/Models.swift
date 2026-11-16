@@ -226,6 +226,14 @@ struct AppData: Codable, Sendable {
     var records: [RunRecord] = []
     var paused: Bool = false
     var marketCatalogMigrationVersion: Int? = 1
+    var removedBundledScriptIDs: Set<String>? = nil
+
+    @discardableResult mutating func removeInstalledScript(_ id: String) -> [ScriptInstance] {
+        let removed = instances.filter { $0.scriptID == id }
+        instances.removeAll { $0.scriptID == id }
+        installedScripts.removeAll { $0.id == id }
+        return removed
+    }
 
     func slotOwner(deviceID: String, taskKey: String, excluding instanceID: UUID) -> ScriptInstance? {
         instances.first { $0.id != instanceID && $0.deviceID == deviceID && $0.taskKey == taskKey }

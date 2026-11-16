@@ -2,6 +2,14 @@ import XCTest
 @testable import Quote0UI
 
 final class LiveIntegrationTests: XCTestCase {
+    func testPublicScriptCatalogBrowse() async throws {
+        guard ProcessInfo.processInfo.environment["QUOTE0_MARKET_TEST"] == "1" else {
+            throw XCTSkip("需显式设置 QUOTE0_MARKET_TEST=1")
+        }
+        let scripts = try await RepositoryService().browse("https://github.com/LinkinStars/quote0-ui/tree/main/ScriptCatalog")
+        XCTAssertEqual(scripts.map(\.manifest.id), ["official.kimi-usage"])
+    }
+
     private func config() throws -> [String: String] {
         guard let path = ProcessInfo.processInfo.environment["QUOTE0_ENV_FILE"] else {
             throw XCTSkip("需设置 QUOTE0_ENV_FILE 指向本机密钥文件")

@@ -97,7 +97,10 @@ struct RepositoryService: Sendable {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("quote0UI/1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else { throw AppError.message("GitHub 请求失败，请检查仓库地址或稍后重试") }
+        guard let response = response as? HTTPURLResponse else { throw AppError.message("GitHub 未返回 HTTP 响应") }
+        guard (200..<300).contains(response.statusCode) else {
+            throw AppError.message("GitHub 请求失败（HTTP \(response.statusCode)），请检查仓库地址或稍后重试")
+        }
         return data
     }
 
@@ -135,16 +138,26 @@ struct RepositoryService: Sendable {
         let catalog = try JSONDecoder().decode(Catalog.self, from: await blob(catalogFile.sha, from: repo))
         guard catalog.schemaVersion == 1 else { throw AppError.message("脚本市场索引版本不受支持") }
         var items: [MarketScript] = []
+        var firstError: String?
         for entry in catalog.scripts {
-            guard GitHubRepository.isSafePath(entry.path), !entry.path.isEmpty else { continue }
+            guard GitHubRepository.isSafePath(entry.path), !entry.path.isEmpty else {
+                firstError = "索引包含无效脚本路径"
+                continue
+            }
             let scriptPath = repo.path(entry.path)
             guard let directory = entries.first(where: { $0.path == scriptPath && $0.type == "tree" }),
-                  let manifestFile = entries.first(where: { $0.path == scriptPath + "/script.json" && $0.type == "blob" }) else { continue }
+                  let manifestFile = entries.first(where: { $0.path == scriptPath + "/script.json" && $0.type == "blob" }) else {
+                firstError = "\(entry.path) 缺少脚本目录或 script.json"
+                continue
+            }
             do {
                 let manifest = try JSONDecoder().decode(ScriptManifest.self, from: await blob(manifestFile.sha, from: repo))
                 try manifest.validate()
                 items.append(MarketScript(manifest: manifest, repository: repo.url, path: scriptPath, ref: repo.ref ?? "HEAD", sha: directory.sha))
-            } catch { continue }
+            } catch { firstError = "\(entry.path)：\(error.localizedDescription)" }
+        }
+        if items.isEmpty, !catalog.scripts.isEmpty {
+            throw AppError.message(firstError ?? "索引中没有可读取的脚本")
         }
         return items
     }
