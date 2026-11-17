@@ -10,15 +10,26 @@ if [[ ! "${bundle_id}" =~ '^[A-Za-z0-9]+([.-][A-Za-z0-9]+)+$' ||
   print -u2 'Bundle ID、版本号或构建号格式无效。'
   exit 2
 fi
-swift build -c release
 app_bundle="${PWD}/build/quote0UI.app"
-bin_dir="$(swift build -c release --show-bin-path)"
+if [[ "${QUOTE0_UNIVERSAL:-0}" == 1 ]]; then
+  swift build -c release --triple arm64-apple-macosx13.0 --scratch-path build/arm64
+  bin_dir="$(swift build -c release --triple arm64-apple-macosx13.0 --scratch-path build/arm64 --show-bin-path)"
+  swift build -c release --triple x86_64-apple-macosx13.0 --scratch-path build/x86_64
+  intel_bin_dir="$(swift build -c release --triple x86_64-apple-macosx13.0 --scratch-path build/x86_64 --show-bin-path)"
+else
+  swift build -c release
+  bin_dir="$(swift build -c release --show-bin-path)"
+fi
 if [[ -d "${app_bundle}" ]]; then
   [[ "${app_bundle}" == "${PWD}/build/quote0UI.app" ]] || exit 2
   rm -rf "${app_bundle}"
 fi
 mkdir -p "${app_bundle}/Contents/MacOS" "${app_bundle}/Contents/Resources"
-cp "${bin_dir}/Quote0UI" "${app_bundle}/Contents/MacOS/Quote0UI"
+if [[ "${QUOTE0_UNIVERSAL:-0}" == 1 ]]; then
+  lipo -create "${bin_dir}/Quote0UI" "${intel_bin_dir}/Quote0UI" -output "${app_bundle}/Contents/MacOS/Quote0UI"
+else
+  cp "${bin_dir}/Quote0UI" "${app_bundle}/Contents/MacOS/Quote0UI"
+fi
 mkdir -p "${app_bundle}/Contents/Resources/Quote0UI_Quote0UI.bundle"
 rsync -a --delete "${bin_dir}/Quote0UI_Quote0UI.bundle/" "${app_bundle}/Contents/Resources/Quote0UI_Quote0UI.bundle/"
 iconset="${PWD}/build/AppIcon.iconset"

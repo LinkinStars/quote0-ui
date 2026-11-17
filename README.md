@@ -1,8 +1,13 @@
-# quote0UI
+<div align="center">
+  <img src="Assets/AppIcon.png" alt="quote0UI 应用图标" width="112" />
+  <h1>quote0UI</h1>
+  <p>让 Quote/0 墨水屏自动显示你关心的内容。</p>
+  <p>一个运行在 macOS 菜单栏的客户端：安装或编写脚本，配置更新间隔，内容就会定时同步到设备。</p>
+  <img src="Assets/README/quote0UI-preview.png" alt="quote0UI 设备概览与 Kimi 用量预览" width="980" />
+  <p><sub>设备概览 · Kimi 用量脚本的内容预览</sub></p>
+</div>
 
-quote0UI 是用于 Quote/0 墨水屏的 macOS 客户端。它定时运行本地脚本，将脚本生成的内容通过 Dot. 开放 API 更新到设备内容槽。应用提供菜单栏入口、脚本配置、内容预览、设备概览和运行记录。
-
-## 功能
+## 可以做什么
 
 - 支持文本、图像和画板内容槽；可以为每个脚本任务设置运行间隔或每日运行时间。
 - 从公开 GitHub 仓库的指定目录浏览、安装和手动更新脚本，也可导入本地脚本目录。
@@ -24,20 +29,6 @@ https://github.com/LinkinStars/quote0-ui/tree/main/ScriptCatalog
 ```
 
 目录内需要有 `catalog.json`，其中的脚本路径相对于该目录。安装时客户端只下载所选脚本；检查更新不会自动替换本地版本。
-
-## 构建
-
-需要 macOS 13 或更新版本，以及支持 Swift 6 的 Xcode 命令行工具。
-
-```sh
-git clone https://github.com/LinkinStars/quote0-ui.git
-cd quote0-ui
-swift test
-./scripts/build-app.sh
-open build/quote0UI.app
-```
-
-`build-app.sh` 生成本地临时签名的应用。发布用的 Developer ID 签名及公证流程见 [`scripts/package-release.sh`](scripts/package-release.sh)，需要预先配置 `QUOTE0_SIGNING_IDENTITY` 和 `QUOTE0_NOTARY_PROFILE`。
 
 ## 脚本协议
 
