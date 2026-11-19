@@ -29,9 +29,28 @@ struct Quote0UIApp: App {
     }
 }
 
-private final class QuoteAppDelegate: NSObject, NSApplicationDelegate {
+@MainActor private final class QuoteAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(self, selector: #selector(mainWindowWillClose(_:)),
+                                               name: NSWindow.willCloseNotification, object: nil)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    @objc private func mainWindowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window.title == "quote0UI", window.styleMask.contains(.titled) else { return }
+        DispatchQueue.main.async {
+            let mainWindowVisible = NSApp.windows.contains {
+                $0.title == "quote0UI" && $0.styleMask.contains(.titled) && $0.isVisible
+            }
+            if !mainWindowVisible { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         guard !hasVisibleWindows else { return true }
+        sender.setActivationPolicy(.regular)
         guard let window = sender.windows.first(where: { $0.title == "quote0UI" && $0.styleMask.contains(.titled) }) else {
             return true
         }
@@ -66,6 +85,7 @@ private struct QuoteMenu: View {
             }
             Divider()
             Button("打开主窗口") {
+                NSApp.setActivationPolicy(.regular)
                 if let window = NSApp.windows.first(where: { $0.title == "quote0UI" && $0.styleMask.contains(.titled) }) {
                     window.makeKeyAndOrderFront(nil)
                 } else {
