@@ -56,6 +56,32 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: URL(fileURLWithPath: installed.directory).appending(path: "run.sh").path))
         let result = try await ScriptRunner().run(installed, parameters: [:])
         XCTAssertEqual(result.content["message"], .string("OK"))
+
+        let nextScriptSHA = String(repeating: "1", count: 40)
+        let nextManifestSHA = String(repeating: "2", count: 40)
+        let nextEntrySHA = String(repeating: "3", count: 40)
+        let nextManifest = ScriptManifest(schemaVersion: 1, id: manifest.id, name: manifest.name, version: "2", description: "", entrypoint: "run.sh", outputType: .text)
+        let nextEntry = Data("#!/bin/sh\nprintf '%s\\n' '{\"protocolVersion\":1,\"type\":\"text\",\"content\":{\"message\":\"NEW\"}}'\n".utf8)
+        let updateResponses: [String: Data] = [
+            apiRoot + "/git/trees/\(nextScriptSHA)?recursive=1": try json(["tree": [
+                ["path": "script.json", "mode": "100644", "type": "blob", "sha": nextManifestSHA],
+                ["path": "run.sh", "mode": "100755", "type": "blob", "sha": nextEntrySHA]
+            ], "truncated": false]),
+            apiRoot + "/git/blobs/\(nextManifestSHA)": try blob(JSONEncoder().encode(nextManifest)),
+            apiRoot + "/git/blobs/\(nextEntrySHA)": try blob(nextEntry)
+        ]
+        let updateService = RepositoryService(fetch: { path in
+            guard let data = updateResponses[path] else { throw AppError.message("Unexpected request: \(path)") }
+            return data
+        })
+        let nextItem = MarketScript(manifest: nextManifest, repository: items[0].repository, path: items[0].path, ref: items[0].ref, sha: nextScriptSHA)
+        let updated = try await updateService.update(nextItem, current: installed, store: LocalStore(root: root), preserveLocal: false)
+        XCTAssertEqual(updated.directory, installed.directory)
+        XCTAssertEqual(updated.manifest.version, "2")
+        XCTAssertEqual(updated.sourceSHA, nextScriptSHA)
+        let newResult = try await ScriptRunner().run(updated, parameters: [:])
+        XCTAssertEqual(newResult.content["message"], .string("NEW"), "更新后必须运行新脚本")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appending(path: "backups").path).count, 1)
     }
 
     func testOldMarketRepositoryMigratesToCurrentRepository() throws {

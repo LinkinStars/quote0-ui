@@ -37,18 +37,20 @@ def reset_label(value, weekly=False):
         return ""
 
 
-def font(size, bold=False):
-    name = "Arial Bold.ttf" if bold else "Arial.ttf"
-    try:
-        return ImageFont.truetype("/System/Library/Fonts/Supplemental/" + name, size)
-    except OSError:
-        return ImageFont.load_default()
+def font(size):
+    # Verdana's wider letterforms stay legible on the 296 px e-ink display.
+    for name in ("Verdana Bold.ttf", "Arial Bold.ttf"):
+        try:
+            return ImageFont.truetype("/System/Library/Fonts/Supplemental/" + name, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
 
 
 def draw_bar(draw, y, label, remaining, reset):
-    draw.text((12, y), label, font=font(13, True), fill=0)
+    draw.text((12, y), label, font=font(13), fill=0)
     note = f"{remaining}% left" + reset
-    note_font = font(15, True)
+    note_font = font(15)
     note_width = draw.textlength(note, font=note_font)
     draw.text((WIDTH - 12 - note_width, y), note, font=note_font, fill=0)
     left, top, right, bottom = 12, y + 20, WIDTH - 12, y + 37
@@ -90,16 +92,18 @@ def main():
     draw = ImageDraw.Draw(image)
     level = ((data.get("user") or {}).get("membership") or {}).get("level") or ""
     title = "KIMI" + ("  /  " + str(level).removeprefix("LEVEL_") if level else "")
-    draw.text((12, 8), title, font=font(17, True), fill=0)
+    draw.text((12, 8), title, font=font(17), fill=0)
     stamp = datetime.now().strftime("%m-%d %H:%M")
-    stamp_width = draw.textlength(stamp, font=font(10))
-    draw.text((WIDTH - 12 - stamp_width, 13), stamp, font=font(10), fill=0)
+    stamp_font = font(11)
+    stamp_width = draw.textlength(stamp, font=stamp_font)
+    draw.text((WIDTH - 12 - stamp_width, 13), stamp, font=stamp_font, fill=0)
     draw.line((0, 34, WIDTH, 34), fill=0, width=1)
     first_y = 50 if len(rows) == 2 else 72
     for index, (label, pct, reset) in enumerate(rows):
         draw_bar(draw, first_y + index * 52, label, pct, reset)
     output = io.BytesIO()
-    image.convert("RGB").save(output, format="PNG")
+    # Remove antialiased grey edge pixels; the device renders pure black and white sharply.
+    image.point(lambda value: 255 if value >= 180 else 0).convert("RGB").save(output, format="PNG")
     json.dump({"protocolVersion": 1, "type": "image", "content": {
         "image": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii"),
         "ditherType": "NONE", "border": 0}}, sys.stdout)

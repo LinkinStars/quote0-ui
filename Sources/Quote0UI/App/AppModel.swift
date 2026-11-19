@@ -37,6 +37,7 @@ final class AppModel: ObservableObject {
     private var timer: Timer?
     private var statusDismissTask: Task<Void, Never>?
     private var running: Set<UUID> = []
+    private var updatingScriptIDs: Set<String> = []
     private var marketRefreshID = UUID()
 
     init() {
@@ -186,15 +187,15 @@ final class AppModel: ObservableObject {
         Task { await refreshMarket() }
     }
 
-    func refreshMarket() async {
+    func refreshMarket(repository only: String? = nil, reportResult: Bool = false) async {
         let refreshID = UUID()
         marketRefreshID = refreshID
-        marketLoading = !data.repositories.isEmpty
-        marketErrors = []
-        guard !data.repositories.isEmpty else { market = []; return }
-        var all: [MarketScript] = []
-        var errors: [String] = []
-        for url in data.repositories {
+        let sources = only.map { [$0] } ?? data.repositories
+        marketLoading = !sources.isEmpty
+        guard !sources.isEmpty else { market = []; marketErrors = []; return }
+        var all = only.map { selected in market.filter { $0.repository != selected } } ?? []
+        var errors = only.map { selected in marketErrors.filter { !$0.hasPrefix(selected + "：") } } ?? []
+        for url in sources {
             do { all += try await repositories.browse(url) }
             catch { errors.append("\(url)：\(error.localizedDescription)") }
         }
@@ -210,6 +211,12 @@ final class AppModel: ObservableObject {
             data.installedScripts[index].availableUpdateSHA = newer.sha
         }
         persist()
+        if reportResult {
+            let count = data.installedScripts.filter { $0.availableUpdateSHA != nil }.count
+            statusMessage = errors.isEmpty
+                ? (count == 0 ? "已检查，没有发现脚本更新" : "发现 \(count) 个脚本更新")
+                : "检查完成，但有仓库读取失败；请查看下方错误"
+        }
     }
 
     func restoreBundledScripts() {
@@ -224,8 +231,8 @@ final class AppModel: ObservableObject {
     func deleteScript(_ id: String) {
         guard let script = data.installedScripts.first(where: { $0.id == id }) else { return }
         let related = data.instances.filter { $0.scriptID == id }
-        guard !related.contains(where: { running.contains($0.id) }) else {
-            statusMessage = "脚本正在运行，请稍后再删除"
+        guard !updatingScriptIDs.contains(id), !related.contains(where: { running.contains($0.id) }) else {
+            statusMessage = "脚本正在运行或更新，请稍后再删除"
             return
         }
         do { try store.deleteScript(script) }
@@ -272,14 +279,81 @@ final class AppModel: ObservableObject {
         } catch { statusMessage = error.localizedDescription }
     }
 
-    func updateMarket(_ item: MarketScript, preserveLocal: Bool = true) async {
-        guard let index = data.installedScripts.firstIndex(where: { $0.id == item.manifest.id }) else { return }
-        busy = true; defer { busy = false }
+    func updateMarket(_ item: MarketScript, refreshContents: Bool) async {
+        let scriptID = item.manifest.id
+        guard let current = data.installedScripts.first(where: { $0.id == scriptID }),
+              current.sourceRepository == item.repository else {
+            statusMessage = "已安装脚本与此仓库不匹配，请重新检查更新"
+            return
+        }
+        guard current.sourceSHA != item.sha else {
+            statusMessage = "此脚本已是当前仓库版本"
+            return
+        }
+        guard !updatingScriptIDs.contains(scriptID),
+              !data.instances.contains(where: { $0.scriptID == scriptID && running.contains($0.id) }) else {
+            statusMessage = "此脚本正在运行或更新，请稍后重试"
+            return
+        }
+        updatingScriptIDs.insert(scriptID)
+        busy = true
+        defer { updatingScriptIDs.remove(scriptID); busy = false }
         do {
-            data.installedScripts[index] = try await repositories.update(item, current: data.installedScripts[index], store: store, preserveLocal: preserveLocal)
+            let updated = try await repositories.update(item, current: current, store: store, preserveLocal: false)
+            let refreshIDs = applyScriptUpdate(updated, previous: current)
             persist()
-            statusMessage = "已更新 \(item.manifest.name)，原版本已备份"
+            updatingScriptIDs.remove(scriptID)
+            guard refreshContents else {
+                statusMessage = "已更新“\(updated.manifest.name)”；旧预览已清除，原版本已备份"
+                return
+            }
+            for id in refreshIDs {
+                if let index = data.instances.firstIndex(where: { $0.id == id }) {
+                    data.instances[index].nextRun = data.instances[index].schedule.next(after: Date())
+                }
+            }
+            var succeeded = 0
+            for id in refreshIDs {
+                if await run(id, push: true, scheduled: true, triggerOverride: "脚本更新") { succeeded += 1 }
+            }
+            statusMessage = refreshIDs.isEmpty
+                ? "已更新“\(updated.manifest.name)”；没有可立即刷新的启用任务，请检查参数与内容槽"
+                : "已更新“\(updated.manifest.name)”；\(succeeded)/\(refreshIDs.count) 个启用的内容已刷新"
         } catch { statusMessage = error.localizedDescription }
+    }
+
+    private func applyScriptUpdate(_ updated: InstalledScript, previous: InstalledScript) -> [UUID] {
+        guard let index = data.installedScripts.firstIndex(where: { $0.id == updated.id }) else { return [] }
+        data.installedScripts[index] = updated
+        var refreshIDs: [UUID] = []
+        for taskIndex in data.instances.indices where data.instances[taskIndex].scriptID == updated.id {
+            let id = data.instances[taskIndex].id
+            previews.removeValue(forKey: id)
+            store.deletePreview(for: id)
+            if previous.manifest.outputType != updated.manifest.outputType {
+                data.instances[taskIndex].taskKey = ""
+                data.instances[taskIndex].enabled = false
+                data.instances[taskIndex].nextRun = nil
+                data.instances[taskIndex].lastStatus = "脚本输出类型已变更，请重新选择内容槽"
+                continue
+            }
+            for parameter in updated.manifest.parameters where data.instances[taskIndex].parameters[parameter.key] == nil {
+                if let value = parameter.defaultValue { data.instances[taskIndex].parameters[parameter.key] = value }
+            }
+            if let missing = missingConfiguration(for: data.instances[taskIndex], script: updated) {
+                data.instances[taskIndex].enabled = false
+                data.instances[taskIndex].nextRun = nil
+                data.instances[taskIndex].lastStatus = missing
+            } else {
+                if data.instances[taskIndex].enabled && !data.instances[taskIndex].taskKey.isEmpty {
+                    data.instances[taskIndex].lastStatus = "脚本已更新，待刷新"
+                    refreshIDs.append(id)
+                } else {
+                    data.instances[taskIndex].lastStatus = "脚本已更新，待测试"
+                }
+            }
+        }
+        return refreshIDs
     }
 
     func addInstance(for script: InstalledScript) {
@@ -426,7 +500,8 @@ final class AppModel: ObservableObject {
 
     @discardableResult func run(_ id: UUID, push: Bool, immediate: Bool = false, scheduled: Bool = false, triggerOverride: String? = nil) async -> Bool {
         guard !running.contains(id), let index = data.instances.firstIndex(where: { $0.id == id }),
-              let script = data.installedScripts.first(where: { $0.id == data.instances[index].scriptID }) else { return false }
+              let script = data.installedScripts.first(where: { $0.id == data.instances[index].scriptID }),
+              !updatingScriptIDs.contains(script.id) else { return false }
         if scheduled && !data.instances[index].enabled { return false }
         running.insert(id)
         defer { running.remove(id) }

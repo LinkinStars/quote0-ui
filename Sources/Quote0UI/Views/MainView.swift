@@ -182,8 +182,9 @@ struct MarketPage: View {
                 HStack {
                     TextField("https://github.com/用户/仓库/tree/main/ScriptCatalog", text: $model.repositoryInput)
                     Button("添加仓库") { model.addRepository() }
-                    Button { Task { await model.refreshMarket() } } label: { Image(systemName: "arrow.clockwise") }
-                        .accessibilityLabel("检查脚本更新")
+                    Button("检查全部更新", systemImage: "arrow.clockwise") {
+                        Task { await model.refreshMarket(reportResult: true) }
+                    }.disabled(model.marketLoading)
                 }
                 if !model.data.repositories.isEmpty {
                     ForEach(model.data.repositories, id: \.self) { repo in
@@ -191,6 +192,9 @@ struct MarketPage: View {
                             Image(systemName: "shippingbox")
                             Text(repo).font(.caption).lineLimit(1)
                             Spacer()
+                            Button("检查更新") {
+                                Task { await model.refreshMarket(repository: repo, reportResult: true) }
+                            }.disabled(model.marketLoading)
                             Button("移除") { model.removeRepository(repo) }.buttonStyle(.link)
                         }
                     }
@@ -204,16 +208,17 @@ struct MarketPage: View {
                     Button("导入本地脚本…") { importing = true }
                 }
                 ForEach(model.data.installedScripts) { script in
-                    ScriptRow(manifest: script.manifest, detail: script.availableUpdateSHA == nil ? "已安装 · \(script.manifest.version)" : "有可用更新", actionTitle: "添加到内容", actionDisabled: false) {
+                    let available = model.market.first { $0.manifest.id == script.id && $0.repository == script.sourceRepository && $0.sha == script.availableUpdateSHA }
+                    ScriptRow(manifest: script.manifest, detail: available.map { scriptUpdateDetail(current: script.manifest, latest: $0.manifest) } ?? "已安装 · \(script.manifest.version)", actionTitle: "添加到内容", actionDisabled: false) {
                         model.addInstance(for: script)
                     } extra: {
                         Button {
                             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: script.directory)])
                         } label: { Image(systemName: "folder") }
                             .accessibilityLabel("在 Finder 打开脚本目录")
-                        if script.availableUpdateSHA != nil,
-                           let item = model.market.first(where: { $0.manifest.id == script.id && $0.repository == script.sourceRepository }) {
+                        if let item = available {
                             Button("更新") { pendingUpdate = item }
+                                .disabled(model.busy)
                         }
                         Button("卸载", role: .destructive) { pendingDeleteScript = script }
                             .alert("卸载“\(script.manifest.name)”？", isPresented: Binding(
@@ -243,9 +248,15 @@ struct MarketPage: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(model.market) { item in
-                    let installed = model.data.installedScripts.contains(where: { $0.id == item.manifest.id })
-                    ScriptRow(manifest: item.manifest, detail: item.repository, actionTitle: installed ? "已安装" : "安装", actionDisabled: installed) {
-                        if !installed { pendingInstall = item }
+                    let installed = model.data.installedScripts.first { $0.id == item.manifest.id }
+                    let hasUpdate = installed?.sourceRepository == item.repository && installed?.sourceSHA != item.sha
+                    let detail = installed.flatMap { hasUpdate ? scriptUpdateDetail(current: $0.manifest, latest: item.manifest) : nil } ?? item.repository
+                    ScriptRow(manifest: item.manifest,
+                              detail: detail,
+                              actionTitle: hasUpdate ? "更新" : (installed == nil ? "安装" : "已安装"),
+                              actionDisabled: model.busy || (installed != nil && !hasUpdate)) {
+                        if hasUpdate { pendingUpdate = item }
+                        else if installed == nil { pendingInstall = item }
                     } extra: { EmptyView() }
                 }
             Text("第三方和本地脚本以当前用户权限执行，可读取本机文件及应用保存的密钥。安装前请确认来源和代码内容。")
@@ -270,11 +281,20 @@ struct MarketPage: View {
         .confirmationDialog("脚本将以当前用户权限运行，请确认仓库可信。", isPresented: Binding(get: { pendingInstall != nil }, set: { if !$0 { pendingInstall = nil } })) {
             Button("安装") { if let item = pendingInstall { Task { await model.installMarket(item) } }; pendingInstall = nil }
         }
-        .confirmationDialog("更新脚本？本地修改将备份后替换。", isPresented: Binding(get: { pendingUpdate != nil }, set: { if !$0 { pendingUpdate = nil } })) {
-            Button("更新并备份") { if let item = pendingUpdate { Task { await model.updateMarket(item, preserveLocal: false) } }; pendingUpdate = nil }
-            Button("保留当前版本", role: .cancel) { pendingUpdate = nil }
+        .confirmationDialog("更新脚本？", isPresented: Binding(get: { pendingUpdate != nil }, set: { if !$0 { pendingUpdate = nil } }), titleVisibility: .visible) {
+            Button("更新并刷新内容") { if let item = pendingUpdate { Task { await model.updateMarket(item, refreshContents: true) } }; pendingUpdate = nil }
+            Button("仅更新脚本") { if let item = pendingUpdate { Task { await model.updateMarket(item, refreshContents: false) } }; pendingUpdate = nil }
+            Button("取消", role: .cancel) { pendingUpdate = nil }
+        } message: {
+            Text("旧脚本会备份，内容任务保留现有配置。选择刷新内容后，已启用的任务会立即使用新脚本更新设备。")
         }
     }
+}
+
+private func scriptUpdateDetail(current: ScriptManifest, latest: ScriptManifest) -> String {
+    current.version == latest.version
+        ? "脚本文件有更新 · 版本 \(latest.version)"
+        : "可更新 · \(current.version) → \(latest.version)"
 }
 
 private struct ScriptRow<Extra: View>: View {

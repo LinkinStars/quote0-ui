@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "official.kimi-usage",
   "name": "Kimi 用量",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "以黑白进度条显示 Kimi 5 小时与每周用量",
   "entrypoint": "run.sh",
   "outputType": "image",

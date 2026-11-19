@@ -199,7 +199,7 @@ struct RepositoryService: Sendable {
         let tempStore = LocalStore(root: tempRoot)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
         let downloaded = try await install(item, store: tempStore)
-        let backup = store.root.appending(path: "backups/\(current.id)-\(Int(Date().timeIntervalSince1970))")
+        let backup = store.root.appending(path: "backups/\(current.id)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.moveItem(at: existing, to: backup)
         do { try FileManager.default.copyItem(at: URL(fileURLWithPath: downloaded.directory), to: existing) }
