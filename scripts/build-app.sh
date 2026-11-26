@@ -2,8 +2,8 @@
 set -euo pipefail
 cd "${0:A:h}/.."
 bundle_id="${QUOTE0_BUNDLE_ID:-com.linkinstars.quote0ui}"
-app_version="${QUOTE0_VERSION:-0.1.2}"
-build_number="${QUOTE0_BUILD_NUMBER:-3}"
+app_version="${QUOTE0_VERSION:-0.1.3}"
+build_number="${QUOTE0_BUILD_NUMBER:-4}"
 if [[ ! "${bundle_id}" =~ '^[A-Za-z0-9]+([.-][A-Za-z0-9]+)+$' ||
       ! "${app_version}" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ||
       ! "${build_number}" =~ '^[0-9]+$' ]]; then

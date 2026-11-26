@@ -63,28 +63,58 @@ struct Quote0UIApp: App {
 private struct QuoteMenu: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    private let background = Color(red: 0.975, green: 0.975, blue: 0.972)
+    private let blue = Color(red: 0.17, green: 0.39, blue: 0.78)
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "rectangle.on.rectangle").foregroundStyle(.tint)
-                Text("quote0UI").font(.headline)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 36, height: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("quote0UI").font(.system(size: 15, weight: .semibold))
+                    Text("Quote/0 内容管理").font(.caption2).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text(model.data.paused ? "已暂停" : "运行中").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Circle().fill(model.data.paused ? .orange : .green).frame(width: 6, height: 6)
+                    Text(model.data.paused ? "已暂停" : "运行中")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(model.data.paused ? .orange : .green)
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(model.data.paused ? Color.orange.opacity(0.10) : Color.green.opacity(0.10),
+                            in: Capsule())
             }
-            Divider()
+            .padding(.bottom, 14)
+
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 let active = model.data.instances.filter(\.enabled)
                 let next = active.compactMap(\.nextRun).min()
                 let relative = next.map { relativeTime(until: $0, from: context.date) } ?? "暂无计划"
-                Text("已启用 \(active.count) 个脚本 · 下次运行 \(model.data.paused ? "已暂停" : relative)")
-                    .font(.subheadline).lineLimit(1)
+                HStack(spacing: 0) {
+                    metric(title: "已启用任务", value: "\(active.count) 个")
+                    Rectangle().fill(.black.opacity(0.08)).frame(width: 1, height: 32)
+                    metric(title: "下次运行", value: model.data.paused ? "已暂停" : relative)
+                }
+                .padding(.vertical, 11)
+                .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.black.opacity(0.06)))
             }
+
             if let last = model.data.records.first, last.status == "失败" {
-                Label(last.detail, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange).lineLimit(2)
+                Label(last.detail, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 10)
             }
-            Divider()
-            Button("打开主窗口") {
+
+            MenuActionRow(title: "打开主窗口", symbol: "rectangle.on.rectangle", prominent: true) {
                 NSApp.setActivationPolicy(.regular)
                 if let window = NSApp.windows.first(where: { $0.title == "quote0UI" && $0.styleMask.contains(.titled) }) {
                     window.makeKeyAndOrderFront(nil)
@@ -93,17 +123,82 @@ private struct QuoteMenu: View {
                 }
                 NSApp.activate(ignoringOtherApps: true)
             }
-            Button(model.data.paused ? "恢复全部" : "暂停全部") { model.data.paused.toggle(); model.persist() }
-            Button("退出 quote0UI") { NSApp.terminate(nil) }
+            .padding(.top, 12)
+
+            MenuActionRow(title: model.data.paused ? "恢复定时任务" : "暂停定时任务",
+                          symbol: model.data.paused ? "play.fill" : "pause.fill") {
+                model.data.paused.toggle()
+                model.persist()
+            }
+            .padding(.top, 6)
+
+            HStack {
+                Text("关闭窗口后仍在后台运行")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                Button("退出") { NSApp.terminate(nil) }
+                    .buttonStyle(.plain)
+                    .modifier(QuietMenuFocus())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 14)
         }
         .padding(16)
-        .frame(width: 280)
+        .frame(width: 312)
+        .background(background)
+        .tint(blue)
     }
+
+    private func metric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 13)
+    }
+
     private func relativeTime(until date: Date, from now: Date) -> String {
         let seconds = max(0, date.timeIntervalSince(now))
         if seconds < 60 { return "即将运行" }
         if seconds < 3_600 { return "\(Int(ceil(seconds / 60))) 分钟后" }
         if seconds < 86_400 { return "\(Int(ceil(seconds / 3_600))) 小时后" }
         return "\(Int(ceil(seconds / 86_400))) 天后"
+    }
+}
+
+private struct MenuActionRow: View {
+    let title: String
+    let symbol: String
+    var prominent = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).frame(width: 18)
+                Text(title).fontWeight(prominent ? .semibold : .medium)
+                Spacer()
+                if prominent { Image(systemName: "chevron.right").font(.caption2.weight(.semibold)) }
+            }
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .background(prominent ? Color.accentColor.opacity(0.11) : .white,
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.black.opacity(prominent ? 0 : 0.06)))
+        }
+        .buttonStyle(.plain)
+        .modifier(QuietMenuFocus())
+        .foregroundStyle(prominent ? Color.accentColor : .primary)
+    }
+}
+
+private struct QuietMenuFocus: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 14.0, *) { content.focusEffectDisabled() }
+        else { content }
     }
 }
