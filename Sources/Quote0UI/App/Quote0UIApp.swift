@@ -65,6 +65,13 @@ private struct QuoteMenu: View {
     @Environment(\.openWindow) private var openWindow
     private let background = Color(red: 0.975, green: 0.975, blue: 0.972)
     private let blue = Color(red: 0.17, green: 0.39, blue: 0.78)
+    private var recentFailure: Bool { model.data.records.first?.status == "失败" }
+    private var statusColor: Color { model.data.paused || recentFailure ? .orange : .green }
+    private var statusTitle: String {
+        if model.data.paused { return "已暂停" }
+        return recentFailure ? "更新失败" : "运行中"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -78,14 +85,13 @@ private struct QuoteMenu: View {
                 }
                 Spacer()
                 HStack(spacing: 5) {
-                    Circle().fill(model.data.paused ? .orange : .green).frame(width: 6, height: 6)
-                    Text(model.data.paused ? "已暂停" : "运行中")
+                    Circle().fill(statusColor).frame(width: 6, height: 6)
+                    Text(statusTitle)
                 }
                 .font(.caption.weight(.medium))
-                .foregroundStyle(model.data.paused ? .orange : .green)
+                .foregroundStyle(statusColor)
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(model.data.paused ? Color.orange.opacity(0.10) : Color.green.opacity(0.10),
-                            in: Capsule())
+                .background(statusColor.opacity(0.10), in: Capsule())
             }
             .padding(.bottom, 14)
 
@@ -101,17 +107,6 @@ private struct QuoteMenu: View {
                 .padding(.vertical, 11)
                 .background(.white, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.black.opacity(0.06)))
-            }
-
-            if let last = model.data.records.first, last.status == "失败" {
-                Label(last.detail, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                    .padding(.top, 10)
             }
 
             MenuActionRow(title: "打开主窗口", symbol: "rectangle.on.rectangle", prominent: true) {
@@ -133,8 +128,10 @@ private struct QuoteMenu: View {
             .padding(.top, 6)
 
             HStack {
-                Text("关闭窗口后仍在后台运行")
+                Text(recentFailure ? "上次更新失败，请在运行记录中查看" : "关闭窗口后仍在后台运行")
                     .font(.caption2).foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .help(recentFailure ? (model.data.records.first?.detail ?? "") : "")
                 Spacer()
                 Button("退出") { NSApp.terminate(nil) }
                     .buttonStyle(.plain)
@@ -145,7 +142,7 @@ private struct QuoteMenu: View {
             .padding(.top, 14)
         }
         .padding(16)
-        .frame(width: 312)
+        .frame(width: 312, height: 260)
         .background(background)
         .tint(blue)
     }
